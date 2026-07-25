@@ -2,6 +2,14 @@
 
 UberHelper web 的所有修改都記在這裡，最新的日期放最上面。
 
+## 2026-07-27
+
+- **修復 Render 上啟動幾秒後就崩潰（Exited with status 7）**（[.node-version](.node-version)、[render.yaml](render.yaml)、[server.mjs](server.mjs)、[package.json](package.json)）— log 裡只有 `throw err` 和一個沒有內容的 `undefined`，完全無從追查。加上 `NODE_OPTIONS=--trace-uncaught` 拿到真正的堆疊後才查出完整因果鏈：某處產生一個**值為 `undefined` 的未處理 Promise 拒絕** → vinext 的 socket 錯誤防護網照設計把非網路斷線的錯誤原封不動重新拋出 → 程序以 status 7 死亡。本機用 `Promise.reject(undefined)` + vinext 的防護網**完整重現了一模一樣的崩潰**（同樣的檔案行號、同樣的 `undefined`、同樣的結束代碼 7），確認因果鏈無誤。
+  - **根本原因判定為 Node 版本**：本機 Node 24.18.0 跑同一份正式建置完全穩定（各種請求、突然斷線的 TCP 連線都撐得住），Render 因為沒指定版本抓了最新的 **Node 26.5.0**，而這個專案用的 `vinext` 是 `0.0.50`（相當早期，套件庫上最新已是 `1.0.0-beta.4`）。用 `.node-version` 和 `render.yaml` 的 `NODE_VERSION` 把版本釘在 24.18.0，`engines` 也改成 `>=22.13.0 <26` 讓不相容能提早被擋下。
+  - **啟動方式從 `vinext start` 改成自己的 [server.mjs](server.mjs)**：查證發現 `vinext start` 的 CLI 最上面靜態 import 了它的 Vite 外掛（只有開發／建置需要），連帶把 vite → rolldown → rolldown 的 watch 模組整串拉進正式環境，實測光是載入就會**覆寫全域的 `process.emit`**。它對錯誤事件只是原封轉發、不是崩潰的源頭（原本一度誤判是它造成的，讀完它的訊號處理邏輯後修正），但會擋在堆疊中間讓崩潰更難追，正式環境也本來就不該載入整套開發工具鏈。改成直接載入 vinext 官方匯出的 `vinext/server/prod-server`（實測 `process.emit` 保持原樣）。
+  - **[server.mjs](server.mjs) 裡在啟動伺服器之前先註冊診斷用的 `unhandledRejection` / `uncaughtException` 監聽器**，因為先註冊的會先執行，就能在 vinext 的防護網把程序弄死之前，先把錯誤的真實內容印進 log。之後若再遇到類似的無訊息崩潰，就有東西可以看。
+- **修正 `pg` 連線池缺少 error 監聽器**（[db/index.ts](db/index.ts)）— Postgres 的 Pool 是 EventEmitter，閒置連線背景出錯時若沒人監聽 `"error"`，Node 會直接讓整個程序崩潰。這是 `pg.Pool` 本來就該有的基本防護，補上。（一度以為這是 Render 崩潰的原因，但後續 log 沒出現這行訊息，證實不是同一件事——不過這個修正本身仍然必要。）
+
 ## 2026-07-26（深夜）
 
 - **推上 GitHub**（`github` remote，`https://github.com/jerry79618/UberHelper.git`）— 使用者要把這份程式碼放到自己的 GitHub，之後要部署到 Render。本機已建好 commit，push 這一步因為權限機制擋下自動化操作，需要使用者自己手動執行 `git push -u github main`。

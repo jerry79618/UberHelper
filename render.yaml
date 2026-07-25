@@ -6,6 +6,11 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: npm run start
     envVars:
+      # 跟 .node-version 一致。Render 預設會抓最新的 Node（實測抓到 26.5.0），
+      # 但這個專案用的 vinext 0.0.50 相當早期，在 Node 26 上會在啟動後幾秒
+      # 內崩潰；Node 24 實測穩定。
+      - key: NODE_VERSION
+        value: 24.18.0
       - key: DATABASE_URL
         fromDatabase:
           name: uberhelper-db
