@@ -1,7 +1,0 @@
-[2m下午4:34:40[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [31merror while updating dependencies:
-Error: ENOENT: no such file or directory, open 'C:\Users\user\OneDrive\文件\UberHelper\web\node_modules\react-loading-skeleton\dist\index.js'
-    at Object.readFileSync (node:fs:440:20)
-    at extractExportsData (file:///C:/Users/user/OneDrive/%E6%96%87%E4%BB%B6/UberHelper/web/node_modules/vite/dist/node/chunks/node.js:31909:26)
-    at async file:///C:/Users/user/OneDrive/%E6%96%87%E4%BB%B6/UberHelper/web/node_modules/vite/dist/node/chunks/node.js:31676:23
-    at async Promise.all (index 4)
-    at async prepareRolldownOptimizerRun (file:///C:/Users/user/OneDrive/%E6%96%87%E4%BB%B6/UberHelper/web/node_modules/vite/dist/node/chunks/node.js:31674:2)[39m
