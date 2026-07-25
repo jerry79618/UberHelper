@@ -595,6 +595,10 @@ a:focus-visible {
   margin-top: 34px;
 }
 
+.field-wide {
+  grid-column: 1 / -1;
+}
+
 .field-grid label > span {
   display: block;
   margin: 0 0 8px 2px;
@@ -659,6 +663,11 @@ summary {
   cursor: pointer;
 }
 
+.raw-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 pre {
   max-height: 130px;
   overflow: auto;
@@ -670,6 +679,155 @@ pre {
   font-size: 11px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.history-section {
+  margin-top: 40px;
+  padding: 30px 34px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+}
+
+.history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.history-header h2 {
+  margin-bottom: 0;
+}
+
+.history-empty {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 22px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--line);
+}
+
+.history-summary div {
+  padding: 16px 18px;
+  background: var(--panel);
+}
+
+.history-summary span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.history-summary strong {
+  color: var(--text);
+  font-size: 20px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 18px;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: 52px 68px 64px 1fr 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--panel-raised);
+  font-size: 13px;
+}
+
+.history-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-decision {
+  font-weight: 700;
+}
+
+.history-accept .history-decision {
+  color: var(--lime);
+}
+
+.history-reject .history-decision {
+  color: var(--coral);
+}
+
+.history-review .history-decision {
+  color: var(--amber);
+}
+
+.history-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.history-destination {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-score {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .history-section {
+    padding: 24px 22px;
+  }
+
+  .history-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .history-item {
+    grid-template-columns: 44px 60px 1fr;
+    grid-template-areas: "time decision amount" "time decision destination";
+    row-gap: 4px;
+  }
+
+  .history-time {
+    grid-area: time;
+  }
+
+  .history-decision {
+    grid-area: decision;
+  }
+
+  .history-amount {
+    grid-area: amount;
+    justify-self: end;
+  }
+
+  .history-destination {
+    grid-area: destination;
+    justify-self: end;
+  }
+
+  .history-score {
+    display: none;
+  }
 }
 
 .how-it-works {

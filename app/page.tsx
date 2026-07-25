@@ -1,96 +1,30 @@
 "use client";
 
-import { ChangeEvent, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  clearEntries,
+  getHistorySnapshot,
+  getServerHistorySnapshot,
+  recordEntry,
+  subscribeToHistory,
+  summarizeToday,
+  todaysEntries,
+} from "./history";
+import { flattenLines, moneyRectangle } from "./ocr-region";
+import {
+  evaluate,
+  initialFields,
+  parseOrderText,
+  type OrderFields,
+} from "./order";
 
 type Phase = "idle" | "reading" | "ready" | "error";
-
-type OrderFields = {
-  income: string;
-  distance: string;
-  minutes: string;
-  destination: string;
-};
-
-type Decision = {
-  kind: "accept" | "reject" | "review";
-  score: number | null;
-  hourlyIncome: number | null;
-  incomePerKm: number | null;
-  reasons: string[];
-};
-
-const hotAreas = [
-  "信義",
-  "永吉路",
-  "ATT",
-  "101",
-  "微風信義",
-  "市政府",
-  "松高路",
-  "松仁路",
-  "大安",
-  "松山",
-];
-
-const coldAreas = ["木柵", "文山", "山區", "偏遠住宅", "南港"];
-
-const initialFields: OrderFields = {
-  income: "",
-  distance: "",
-  minutes: "",
-  destination: "",
-};
-
-function firstMatch(text: string, patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) return match[1].replace(",", ".");
-  }
-  return "";
-}
-
-function findArea(text: string) {
-  return [...hotAreas, ...coldAreas].find((area) =>
-    text.toLocaleLowerCase().includes(area.toLocaleLowerCase()),
-  );
-}
-
-function parseOrderText(text: string, moneyRegionText = ""): OrderFields {
-  const normalized = text
-    .replaceAll("，", ",")
-    .replaceAll("．", ".")
-    .replaceAll("＄", "$");
-  const compactCurrencyText = normalized.replace(/\s+/g, "");
-  const compactMoneyRegion = moneyRegionText
-    .replaceAll("＄", "$")
-    .replace(/\s+/g, "");
-  const income =
-    firstMatch(compactCurrencyText, [
-      /(?:NT[$S5]|NTD|[$])([0-9]{2,4}(?:[.,][0-9]+)?)/i,
-      /(?:收入|費用|金額|預估收入)[:：]?([0-9]{2,4}(?:[.,][0-9]+)?)/i,
-      /([0-9]{2,4}(?:[.,][0-9]+)?)元/i,
-    ]) ||
-    firstMatch(compactMoneyRegion, [
-      /(?:NT[$S5]|NTD|[$])([0-9]{2,4}(?:[.,][0-9]+)?)/i,
-      /(?:^|[^0-9])([0-9]{2,4})(?:[^0-9]|$)/,
-    ]);
-
-  return {
-    income,
-    distance: firstMatch(normalized, [
-      /([0-9]+(?:[.,][0-9]+)?)\s*(?:公里|km)/i,
-    ]),
-    minutes: firstMatch(normalized, [
-      /([0-9]{1,3}(?:[.,][0-9]+)?)\s*(?:分鐘|分|min|mins|minutes)/i,
-    ]),
-    destination:
-      normalized.match(
-        /(?:送達|目的地|終點)\s*[:：]?\s*([^\n\r]+)/i,
-      )?.[1]?.trim() ??
-      findArea(compactCurrencyText) ??
-      "",
-  };
-}
 
 async function imageDimensions(file: File) {
   const objectUrl = URL.createObjectURL(file);
@@ -113,105 +47,6 @@ async function imageDimensions(file: File) {
   }
 }
 
-function moneyRectangle(width: number, height: number) {
-  return {
-    left: Math.round(width * 0.01),
-    top: Math.round(height * 0.44),
-    width: Math.round(width * 0.74),
-    height: Math.round(height * 0.2),
-  };
-}
-
-function clamp(value: number) {
-  return Math.min(Math.max(value, 0), 100);
-}
-
-function normalize(value: number, low: number, high: number) {
-  return clamp(((value - low) / (high - low)) * 100);
-}
-
-function includesArea(destination: string, areas: string[]) {
-  return areas.some((area) =>
-    destination.toLocaleLowerCase().includes(area.toLocaleLowerCase()),
-  );
-}
-
-function evaluate(fields: OrderFields): Decision {
-  const income = Number(fields.income);
-  const distance = Number(fields.distance);
-
-  if (!income || !distance || income <= 0 || distance <= 0) {
-    const reasons = [];
-    if (!income || income <= 0) reasons.push("請確認訂單金額");
-    if (!distance || distance <= 0) reasons.push("請確認配送距離");
-    return {
-      kind: "review",
-      score: null,
-      hourlyIncome: null,
-      incomePerKm: null,
-      reasons,
-    };
-  }
-
-  const minutes =
-    Number(fields.minutes) > 0
-      ? Number(fields.minutes)
-      : 8 + distance * 4.5;
-  const hourlyIncome = (income / minutes) * 60;
-  const incomePerKm = income / distance;
-  const isHot = includesArea(fields.destination, hotAreas);
-  const isCold = includesArea(fields.destination, coldAreas);
-  const destinationScore = isHot ? 90 : isCold ? 20 : 50;
-  const returnScore = isHot ? 90 : isCold ? 15 : 50;
-
-  const score =
-    normalize(hourlyIncome, 160, 420) * 0.35 +
-    normalize(incomePerKm, 12, 40) * 0.25 +
-    destinationScore * 0.2 +
-    60 * 0.1 +
-    returnScore * 0.1;
-  const kind = score >= 60 ? "accept" : "reject";
-  const reasons: string[] = [];
-
-  if (kind === "accept") {
-    if (hourlyIncome >= 300) {
-      reasons.push(`預估時薪 $${Math.round(hourlyIncome)}，效率良好`);
-    } else {
-      reasons.push("綜合收益與路線達到接單門檻");
-    }
-    if (incomePerKm >= 25) {
-      reasons.push(`每公里 $${Math.round(incomePerKm)}，距離效益良好`);
-    }
-    if (isHot) {
-      reasons.push(`終點在${fields.destination}，送達後較容易留在熱區`);
-    }
-  } else {
-    if (hourlyIncome < 250) {
-      reasons.push(`預估時薪僅 $${Math.round(hourlyIncome)}，可能拉低效率`);
-    }
-    if (incomePerKm < 20) {
-      reasons.push(`每公里僅 $${Math.round(incomePerKm)}，距離成本偏高`);
-    }
-    if (isCold) {
-      reasons.push(`終點在${fields.destination}，空車回熱區風險較高`);
-    }
-  }
-
-  if (!reasons.length) {
-    reasons.push(
-      kind === "accept" ? "綜合評分達到接單門檻" : "綜合評分未達接單門檻",
-    );
-  }
-
-  return {
-    kind,
-    score: Math.round(score),
-    hourlyIncome,
-    incomePerKm,
-    reasons: reasons.slice(0, 3),
-  };
-}
-
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [fields, setFields] = useState<OrderFields>(initialFields);
@@ -220,8 +55,52 @@ export default function Home() {
   const [status, setStatus] = useState("準備辨識");
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [errorMessage, setErrorMessage] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const decision = useMemo(() => evaluate(fields), [fields]);
+  // localStorage 在 SSR 階段不存在；伺服器與剛掛載時都用空陣列，
+  // 掛載後 React 會自動補上瀏覽器裡的真正資料，不會有 hydration 不一致的問題。
+  const history = useSyncExternalStore(
+    subscribeToHistory,
+    getHistorySnapshot,
+    getServerHistorySnapshot,
+  );
+  const todaySummary = useMemo(() => summarizeToday(history), [history]);
+  const todayEntries = useMemo(() => todaysEntries(history), [history]);
+
+  function recordHistoryEntry(parsedFields: OrderFields) {
+    const outcome = evaluate(parsedFields);
+    recordEntry({
+      id:
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`,
+      recordedAt: new Date().toISOString(),
+      income: Number(parsedFields.income) || 0,
+      distance: Number(parsedFields.distance) || 0,
+      minutes: Number(parsedFields.minutes) || null,
+      stores: Number(parsedFields.stores) || 1,
+      destination: parsedFields.destination,
+      decision: outcome.kind,
+      score: outcome.score,
+    });
+  }
+
+  function clearTodayHistory() {
+    const todayIds = new Set(todayEntries.map((entry) => entry.id));
+    clearEntries((entry) => !todayIds.has(entry.id));
+  }
+
+  async function copyRawText() {
+    try {
+      await navigator.clipboard.writeText(rawText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   async function analyzeImage(file: File) {
     if (!file.type.startsWith("image/")) {
@@ -238,16 +117,11 @@ export default function Home() {
     setErrorMessage("");
 
     try {
-      const { createWorker, PSM } = await import("tesseract.js");
-      let recognitionStage: "full" | "money" = "full";
+      const { createWorker, OEM, PSM } = await import("tesseract.js");
       const worker = await createWorker(["eng", "chi_tra"], 1, {
         logger: (message) => {
           if (typeof message.progress === "number") {
-            setProgress(
-              recognitionStage === "full"
-                ? Math.round(message.progress * 75)
-                : 75 + Math.round(message.progress * 25),
-            );
+            setProgress(Math.round(message.progress * 75));
           }
           if (message.status === "recognizing text") {
             setStatus("正在讀取訂單內容");
@@ -257,33 +131,54 @@ export default function Home() {
         },
       });
 
-      const result = await worker.recognize(file);
+      const result = await worker.recognize(
+        file,
+        {},
+        { text: true, blocks: true },
+      );
       let moneyText = "";
       let parsedFields = parseOrderText(result.data.text);
+      await worker.terminate();
 
       if (!parsedFields.income) {
-        recognitionStage = "money";
         setStatus("重新確認訂單金額");
-        setProgress(76);
+        setProgress(80);
 
         const dimensions = await imageDimensions(file);
-        await worker.setParameters({
-          tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+        // 派單卡片的金額是淺色大字配深色背景，LSTM 引擎在這種畫面上常把「1」
+        // 讀成「I」或整段漏讀；改用傳統（legacy）引擎重掃這一小塊區域穩定得多。
+        // 傳統引擎不支援字元白名單（會讓輸出整個消失），所以不設白名單，靠
+        // parseOrderText 自己從乾淨許多的輸出裡挑數字。
+        const moneyWorker = await createWorker(["eng"], OEM.TESSERACT_ONLY, {
+          logger: (message) => {
+            if (typeof message.progress === "number") {
+              setProgress(80 + Math.round(message.progress * 20));
+            }
+          },
         });
-        const moneyResult = await worker.recognize(file, {
-          rectangle: moneyRectangle(dimensions.width, dimensions.height),
+        await moneyWorker.setParameters({
+          tessedit_pageseg_mode: PSM.SINGLE_LINE,
+        });
+        const moneyResult = await moneyWorker.recognize(file, {
+          rectangle: moneyRectangle(
+            flattenLines(result.data.blocks),
+            dimensions.width,
+            dimensions.height,
+          ),
         });
         moneyText = moneyResult.data.text.trim();
         parsedFields = parseOrderText(result.data.text, moneyText);
+        await moneyWorker.terminate();
       }
-
-      await worker.terminate();
 
       const text = result.data.text.trim();
       if (!text) throw new Error("圖片中沒有辨識到文字");
 
       setRawText(moneyText ? `${moneyText}\n\n${text}` : text);
+      // 有欄位沒讀到時直接把原始文字攤開，才看得出 OCR 到底讀成什麼。
+      setRawOpen(!parsedFields.income || !parsedFields.distance);
       setFields(parsedFields);
+      recordHistoryEntry(parsedFields);
       setProgress(100);
       setPhase("ready");
     } catch (error) {
@@ -529,6 +424,22 @@ export default function Home() {
                 </label>
 
                 <label>
+                  <span>取餐店家數</span>
+                  <div className="input-shell">
+                    <input
+                      inputMode="numeric"
+                      value={fields.stores}
+                      onChange={(event) =>
+                        updateField("stores", event.target.value)
+                      }
+                      placeholder="1"
+                      aria-label="取餐店家數"
+                    />
+                    <b>間</b>
+                  </div>
+                </label>
+
+                <label className="field-wide">
                   <span>目的地</span>
                   <div className="input-shell">
                     <input
@@ -536,15 +447,27 @@ export default function Home() {
                       onChange={(event) =>
                         updateField("destination", event.target.value)
                       }
-                      placeholder="例如 市政府"
+                      placeholder="例如 信義區吳興街"
                       aria-label="目的地"
                     />
                   </div>
                 </label>
               </div>
 
-              <details>
+              <details
+                open={rawOpen}
+                onToggle={(event) => setRawOpen(event.currentTarget.open)}
+              >
                 <summary>查看 OCR 原始文字</summary>
+                <div className="raw-actions">
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={copyRawText}
+                  >
+                    {copied ? "已複製" : "複製原始文字"}
+                  </button>
+                </div>
                 <pre>{rawText}</pre>
               </details>
             </section>
@@ -558,6 +481,79 @@ export default function Home() {
           accept="image/*"
           onChange={onFileChange}
         />
+      </section>
+
+      <section className="history-section" aria-label="今日記錄">
+        <div className="history-header">
+          <div>
+            <span className="step-label">TODAY</span>
+            <h2>今日記錄</h2>
+          </div>
+          {todayEntries.length > 0 && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={clearTodayHistory}
+            >
+              清除今日記錄
+            </button>
+          )}
+        </div>
+
+        {todayEntries.length === 0 ? (
+          <p className="history-empty">
+            今天還沒有分析紀錄，上傳截圖後會自動記在這裡（只存在這支手機的瀏覽器裡）。
+          </p>
+        ) : (
+          <>
+            <div className="history-summary">
+              <div>
+                <span>今日已分析</span>
+                <strong>{todaySummary.count} 筆</strong>
+              </div>
+              <div>
+                <span>建議接單</span>
+                <strong>{todaySummary.acceptedCount} 筆</strong>
+              </div>
+              <div>
+                <span>接單預估收入</span>
+                <strong>${todaySummary.acceptedIncome}</strong>
+              </div>
+            </div>
+
+            <ul className="history-list">
+              {todayEntries.map((entry) => (
+                <li
+                  key={entry.id}
+                  className={`history-item history-${entry.decision}`}
+                >
+                  <span className="history-time">
+                    {new Date(entry.recordedAt).toLocaleTimeString("zh-TW", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  <span className="history-decision">
+                    {entry.decision === "accept"
+                      ? "接單"
+                      : entry.decision === "reject"
+                        ? "不接"
+                        : "確認資料"}
+                  </span>
+                  <span className="history-amount">
+                    {entry.income ? `$${entry.income}` : "—"}
+                  </span>
+                  <span className="history-destination">
+                    {entry.destination || "—"}
+                  </span>
+                  <span className="history-score">
+                    {entry.score !== null ? `${entry.score} 分` : "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       <section className="how-it-works">
