@@ -55,18 +55,28 @@ function findArea(text: string) {
   );
 }
 
-function parseOrderText(text: string): OrderFields {
+function parseOrderText(text: string, moneyRegionText = ""): OrderFields {
   const normalized = text
     .replaceAll("，", ",")
     .replaceAll("．", ".")
     .replaceAll("＄", "$");
+  const compactCurrencyText = normalized.replace(/\s+/g, "");
+  const compactMoneyRegion = moneyRegionText
+    .replaceAll("＄", "$")
+    .replace(/\s+/g, "");
+  const income =
+    firstMatch(compactCurrencyText, [
+      /(?:NT[$S5]|NTD|[$])([0-9]{2,4}(?:[.,][0-9]+)?)/i,
+      /(?:收入|費用|金額|預估收入)[:：]?([0-9]{2,4}(?:[.,][0-9]+)?)/i,
+      /([0-9]{2,4}(?:[.,][0-9]+)?)元/i,
+    ]) ||
+    firstMatch(compactMoneyRegion, [
+      /(?:NT[$S5]|NTD|[$])([0-9]{2,4}(?:[.,][0-9]+)?)/i,
+      /(?:^|[^0-9])([0-9]{2,4})(?:[^0-9]|$)/,
+    ]);
 
   return {
-    income: firstMatch(normalized, [
-      /(?:NT\$|NTD|\$)\s*([0-9]{2,4}(?:[.,][0-9]+)?)/i,
-      /(?:收入|費用|金額|預估收入)\s*[:：]?\s*([0-9]{2,4}(?:[.,][0-9]+)?)/i,
-      /([0-9]{2,4}(?:[.,][0-9]+)?)\s*元/i,
-    ]),
+    income,
     distance: firstMatch(normalized, [
       /([0-9]+(?:[.,][0-9]+)?)\s*(?:公里|km)/i,
     ]),
@@ -77,8 +87,38 @@ function parseOrderText(text: string): OrderFields {
       normalized.match(
         /(?:送達|目的地|終點)\s*[:：]?\s*([^\n\r]+)/i,
       )?.[1]?.trim() ??
-      findArea(normalized) ??
+      findArea(compactCurrencyText) ??
       "",
+  };
+}
+
+async function imageDimensions(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    return await new Promise<{ width: number; height: number }>(
+      (resolve, reject) => {
+        const image = new Image();
+        image.onload = () =>
+          resolve({
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+          });
+        image.onerror = () => reject(new Error("無法讀取圖片尺寸"));
+        image.src = objectUrl;
+      },
+    );
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function moneyRectangle(width: number, height: number) {
+  return {
+    left: Math.round(width * 0.01),
+    top: Math.round(height * 0.44),
+    width: Math.round(width * 0.74),
+    height: Math.round(height * 0.2),
   };
 }
 
@@ -198,11 +238,16 @@ export default function Home() {
     setErrorMessage("");
 
     try {
-      const { createWorker } = await import("tesseract.js");
+      const { createWorker, PSM } = await import("tesseract.js");
+      let recognitionStage: "full" | "money" = "full";
       const worker = await createWorker(["eng", "chi_tra"], 1, {
         logger: (message) => {
           if (typeof message.progress === "number") {
-            setProgress(Math.round(message.progress * 100));
+            setProgress(
+              recognitionStage === "full"
+                ? Math.round(message.progress * 75)
+                : 75 + Math.round(message.progress * 25),
+            );
           }
           if (message.status === "recognizing text") {
             setStatus("正在讀取訂單內容");
@@ -213,13 +258,32 @@ export default function Home() {
       });
 
       const result = await worker.recognize(file);
+      let moneyText = "";
+      let parsedFields = parseOrderText(result.data.text);
+
+      if (!parsedFields.income) {
+        recognitionStage = "money";
+        setStatus("重新確認訂單金額");
+        setProgress(76);
+
+        const dimensions = await imageDimensions(file);
+        await worker.setParameters({
+          tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+        });
+        const moneyResult = await worker.recognize(file, {
+          rectangle: moneyRectangle(dimensions.width, dimensions.height),
+        });
+        moneyText = moneyResult.data.text.trim();
+        parsedFields = parseOrderText(result.data.text, moneyText);
+      }
+
       await worker.terminate();
 
       const text = result.data.text.trim();
       if (!text) throw new Error("圖片中沒有辨識到文字");
 
-      setRawText(text);
-      setFields(parseOrderText(text));
+      setRawText(moneyText ? `${moneyText}\n\n${text}` : text);
+      setFields(parsedFields);
       setProgress(100);
       setPhase("ready");
     } catch (error) {
@@ -524,4 +588,3 @@ export default function Home() {
     </main>
   );
 }
-

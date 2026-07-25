@@ -24,6 +24,7 @@
 
 # debug
 *.log
+*.traineddata
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
