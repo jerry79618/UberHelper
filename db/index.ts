@@ -27,6 +27,12 @@ export function getDb() {
         ? false
         : { rejectUnauthorized: false },
     });
+    // pg 的 Pool 是 EventEmitter：閒置連線背景出錯時會 emit "error"，
+    // 沒人監聽的話 Node 會把整個程序當成未處理例外直接炸掉。這裡接住、
+    // 印出來就好，不能讓一個閒置連線的問題搞垮整個網站。
+    pool.on("error", (error) => {
+      console.error("[db] idle Postgres client error:", error);
+    });
   }
 
   return drizzle(pool, { schema });
