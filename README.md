@@ -23,8 +23,7 @@ This starter does not use `wrangler.jsonc`.
 - edit site code under `app/`
 - `.openai/hosting.json` declares optional Sites D1 and R2 bindings
 - `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
+- `db/schema.ts` defines the `order_history` table (Postgres, via `drizzle-orm/node-postgres`)
 - `drizzle.config.ts` supports local migration generation when needed
 
 ## Workspace Auth Headers
@@ -89,10 +88,35 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
+- `npm run start`: run the built app as a plain Node HTTP server (what Render uses)
 - `npm test`: build the starter and verify its rendered loading skeleton
 - `npm run db:generate`: generate Drizzle migrations after schema changes
+- `npm run db:migrate`: apply pending migrations to the Postgres database at `DATABASE_URL`
+
+## Deploying to Render
+
+This app's history feature (`/history`, `/api/history`) reads and writes a
+Postgres database via `drizzle-orm/node-postgres`, so it needs a real
+Postgres instance — Cloudflare D1 does not work outside Cloudflare Workers.
+
+1. Push this repo to GitHub.
+2. In Render, create a Blueprint from the repo — it will read
+   [`render.yaml`](render.yaml) and provision both the web service and a
+   Postgres database, wiring `DATABASE_URL` automatically. (Or create the two
+   resources by hand and set `DATABASE_URL` on the web service to the
+   Postgres instance's **Internal Database URL**.)
+3. After the first deploy, apply the migration once: open the web service's
+   Shell tab on Render and run `npm run db:migrate` (or run it locally with
+   `DATABASE_URL` set to the database's **External Database URL**).
+4. For local development against the same database, add `DATABASE_URL` to a
+   git-ignored `.env.local` file.
+
+`npm run build` + `npm run start` is a portable Node server (respects
+`$PORT`) — it does not depend on Cloudflare Workers, `wrangler`, or the
+`worker/index.ts` entry point, which only matters for the separate Cloudflare
+Sites deployment path this starter also supports.
 
 ## Learn More
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- [Drizzle Postgres Guide](https://orm.drizzle.team/docs/get-started/postgresql-new)

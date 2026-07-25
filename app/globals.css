@@ -681,24 +681,6 @@ pre {
   white-space: pre-wrap;
 }
 
-.history-section {
-  margin-top: 40px;
-  padding: 30px 34px;
-  border: 1px solid var(--line);
-  border-radius: 28px;
-  background: var(--panel);
-}
-
-.history-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.history-header h2 {
-  margin-bottom: 0;
-}
-
 .history-empty {
   margin-top: 18px;
   color: var(--muted);
@@ -745,7 +727,7 @@ pre {
 
 .history-item {
   display: grid;
-  grid-template-columns: 52px 68px 64px 1fr 56px;
+  grid-template-columns: 52px 68px 64px 1fr 56px 110px;
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
@@ -792,11 +774,83 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 640px) {
-  .history-section {
-    padding: 24px 22px;
-  }
+.history-source {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
+.history-page {
+  width: min(100%, var(--max-width));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 40px 28px 80px;
+}
+
+.history-page-header {
+  margin-bottom: 34px;
+}
+
+.history-page-header h1 {
+  margin: 22px 0 8px;
+  font-size: 32px;
+}
+
+.history-page-header p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.history-page-error {
+  padding: 20px 24px;
+  border: 1px solid rgba(255, 113, 105, 0.3);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--coral);
+}
+
+.history-page-error p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.history-summary-page {
+  margin-bottom: 34px;
+}
+
+.history-day {
+  margin-bottom: 30px;
+  padding: 24px 28px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+}
+
+.history-day-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-day-header h2 {
+  margin-bottom: 0;
+  font-size: 18px;
+}
+
+.history-day-header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
   .history-summary {
     grid-template-columns: 1fr;
   }
@@ -825,8 +879,21 @@ pre {
     justify-self: end;
   }
 
-  .history-score {
+  .history-score,
+  .history-source {
     display: none;
+  }
+
+  .history-day {
+    padding: 20px 18px;
+  }
+
+  .history-page {
+    padding: 28px 18px 60px;
+  }
+
+  .history-page-header h1 {
+    font-size: 26px;
   }
 }
 

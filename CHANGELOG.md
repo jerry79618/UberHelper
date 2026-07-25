@@ -2,6 +2,15 @@
 
 UberHelper web 的所有修改都記在這裡，最新的日期放最上面。
 
+## 2026-07-26（深夜）
+
+- **推上 GitHub**（`github` remote，`https://github.com/jerry79618/UberHelper.git`）— 使用者要把這份程式碼放到自己的 GitHub，之後要部署到 Render。本機已建好 commit，push 這一步因為權限機制擋下自動化操作，需要使用者自己手動執行 `git push -u github main`。
+- **記錄改成集中存到 Postgres，不再只存在單一裝置的 localStorage**（[db/schema.ts](db/schema.ts)、[db/index.ts](db/index.ts)、[app/api/history/route.ts](app/api/history/route.ts)、[app/history/page.tsx](app/history/page.tsx)）— 使用者想要的是「不論手機、電腦、哪個 IP 上傳都要集中在一起，每天在電腦上看」，這在架構上跟前一版的 localStorage 方案（[[uberhelper-web-overview]] 提過的隱私設計）互斥，因為 localStorage 是各裝置各自獨立的。改用真正的資料庫：新增 `order_history` 資料表（金額、距離、時間、店家數、目的地、判斷、分數、來源 IP），OCR 分析完成後前端 POST 給 `/api/history` 寫入；新頁面 `/history`（Server Component，直接查資料庫，`force-dynamic` 不做靜態預先渲染）依台北日曆日分組顯示所有記錄與每日小結，不顯示在首頁（首頁只留一個「查看所有記錄」連結）。
+- **資料庫從 Cloudflare D1 換成 Postgres**（[db/index.ts](db/index.ts)、[db/schema.ts](db/schema.ts)、[drizzle.config.ts](drizzle.config.ts)）— 原本一度想直接用專案內建的 D1 範例架構做集中記錄，但查證後發現 D1 是 Cloudflare Workers 專屬的，`import { env } from "cloudflare:workers"` 在 Render 的一般 Node.js 環境下根本無法載入；已讀過 `vinext start` 原始碼確認它是不依賴 Cloudflare 執行環境的 Node HTTP server，能直接部署到 Render，所以資料庫要換成 Render 相容的 Postgres 才不會衝突。改用 `drizzle-orm/node-postgres` + `pg`，透過 `DATABASE_URL` 環境變數連線，Render 的受管 Postgres 需要 SSL（本機接 localhost 時關閉）。
+- **移除已經過時、跟現況不符的 D1 範例**（`examples/d1/`）— 換成 Postgres 之後這個範例的 sqlite schema 跟 `db/index.ts` 的型別不相容，而且從來沒有真正的程式碼在用它，留著只會一直報型別錯誤，直接刪除並更新 README 的說明。
+- **新增 `render.yaml`**，用 Render 的 Blueprint 一次建好 Web Service 和 Postgres 資料庫、自動把連線字串接成 `DATABASE_URL` 環境變數；也加了 `npm run db:migrate`（`drizzle-kit migrate`）供第一次部署後手動套用資料表 migration。**這個檔案沒有實際在 Render 上跑過，欄位是照 Render Blueprint 文件的一般寫法寫的，第一次用請對照 Render 當下的文件確認。**
+- **這次的資料庫程式碼沒有接到真正的 Postgres 測試過**——本機環境沒有 Docker 也沒有本機 Postgres，只驗證了：型別檢查通過、build 成功、`DATABASE_URL` 沒設定時 `/history` 和 `/api/history` 會顯示清楚的錯誤訊息而不會讓整個網站掛掉。真正的讀寫（insert/select、SSL 連線、migration 有沒有套用成功）要等接上真的 Postgres（本機或 Render）才能確認。
+
 ## 2026-07-26（晚上）
 
 - **新增「今日記錄」功能**（[app/history.ts](app/history.ts)、[app/page.tsx](app/page.tsx)、[app/globals.css](app/globals.css)）— 使用者發現目前完全沒有記錄任何上傳結果，每次分析完換下一張就消失了。加上本機記錄：每次 OCR 分析完成（不管結果是接單／不接／確認資料）都會存一筆金額、距離、時間、店家數、目的地、建議、分數到瀏覽器的 `localStorage`（key: `uberhelper.history.v1`，只存數字結果，不存圖片，符合「圖片留在裝置、不上傳」的既有隱私承諾）。畫面新增「今日記錄」區塊，顯示今天筆數、建議接單筆數、接單預估收入加總，以及逐筆列表；有「清除今日記錄」按鈕。

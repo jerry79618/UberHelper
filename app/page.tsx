@@ -1,21 +1,7 @@
 "use client";
 
-import {
-  ChangeEvent,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import {
-  clearEntries,
-  getHistorySnapshot,
-  getServerHistorySnapshot,
-  recordEntry,
-  subscribeToHistory,
-  summarizeToday,
-  todaysEntries,
-} from "./history";
+import { ChangeEvent, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { flattenLines, moneyRectangle } from "./ocr-region";
 import {
   evaluate,
@@ -59,37 +45,25 @@ export default function Home() {
   const [rawOpen, setRawOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const decision = useMemo(() => evaluate(fields), [fields]);
-  // localStorage 在 SSR 階段不存在；伺服器與剛掛載時都用空陣列，
-  // 掛載後 React 會自動補上瀏覽器裡的真正資料，不會有 hydration 不一致的問題。
-  const history = useSyncExternalStore(
-    subscribeToHistory,
-    getHistorySnapshot,
-    getServerHistorySnapshot,
-  );
-  const todaySummary = useMemo(() => summarizeToday(history), [history]);
-  const todayEntries = useMemo(() => todaysEntries(history), [history]);
 
+  // 記錄集中存在伺服器（跨裝置共用），這裡只負責送出，失敗也不擋主流程；
+  // 要看記錄請到 /history 頁面，那裡直接查資料庫。
   function recordHistoryEntry(parsedFields: OrderFields) {
     const outcome = evaluate(parsedFields);
-    recordEntry({
-      id:
-        typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`,
-      recordedAt: new Date().toISOString(),
-      income: Number(parsedFields.income) || 0,
-      distance: Number(parsedFields.distance) || 0,
-      minutes: Number(parsedFields.minutes) || null,
-      stores: Number(parsedFields.stores) || 1,
-      destination: parsedFields.destination,
-      decision: outcome.kind,
-      score: outcome.score,
-    });
-  }
 
-  function clearTodayHistory() {
-    const todayIds = new Set(todayEntries.map((entry) => entry.id));
-    clearEntries((entry) => !todayIds.has(entry.id));
+    void fetch("/api/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        income: Number(parsedFields.income) || 0,
+        distance: Number(parsedFields.distance) || 0,
+        minutes: Number(parsedFields.minutes) || null,
+        stores: Number(parsedFields.stores) || 1,
+        destination: parsedFields.destination,
+        decision: outcome.kind,
+        score: outcome.score,
+      }),
+    }).catch(() => {});
   }
 
   async function copyRawText() {
@@ -483,79 +457,6 @@ export default function Home() {
         />
       </section>
 
-      <section className="history-section" aria-label="今日記錄">
-        <div className="history-header">
-          <div>
-            <span className="step-label">TODAY</span>
-            <h2>今日記錄</h2>
-          </div>
-          {todayEntries.length > 0 && (
-            <button
-              type="button"
-              className="text-button"
-              onClick={clearTodayHistory}
-            >
-              清除今日記錄
-            </button>
-          )}
-        </div>
-
-        {todayEntries.length === 0 ? (
-          <p className="history-empty">
-            今天還沒有分析紀錄，上傳截圖後會自動記在這裡（只存在這支手機的瀏覽器裡）。
-          </p>
-        ) : (
-          <>
-            <div className="history-summary">
-              <div>
-                <span>今日已分析</span>
-                <strong>{todaySummary.count} 筆</strong>
-              </div>
-              <div>
-                <span>建議接單</span>
-                <strong>{todaySummary.acceptedCount} 筆</strong>
-              </div>
-              <div>
-                <span>接單預估收入</span>
-                <strong>${todaySummary.acceptedIncome}</strong>
-              </div>
-            </div>
-
-            <ul className="history-list">
-              {todayEntries.map((entry) => (
-                <li
-                  key={entry.id}
-                  className={`history-item history-${entry.decision}`}
-                >
-                  <span className="history-time">
-                    {new Date(entry.recordedAt).toLocaleTimeString("zh-TW", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                  <span className="history-decision">
-                    {entry.decision === "accept"
-                      ? "接單"
-                      : entry.decision === "reject"
-                        ? "不接"
-                        : "確認資料"}
-                  </span>
-                  <span className="history-amount">
-                    {entry.income ? `$${entry.income}` : "—"}
-                  </span>
-                  <span className="history-destination">
-                    {entry.destination || "—"}
-                  </span>
-                  <span className="history-score">
-                    {entry.score !== null ? `${entry.score} 分` : "—"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </section>
-
       <section className="how-it-works">
         <span className="section-number">01—03</span>
         <div className="steps">
@@ -580,6 +481,9 @@ export default function Home() {
       <footer>
         <span>UberHelper</span>
         <p>輔助判斷，不會自動操作外送平台。行車安全優先。</p>
+        <Link className="text-button" href="/history">
+          查看所有記錄
+        </Link>
       </footer>
     </main>
   );

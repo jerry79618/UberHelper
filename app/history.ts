@@ -1,3 +1,5 @@
+export type Decision = "accept" | "reject" | "review";
+
 export type HistoryEntry = {
   id: string;
   recordedAt: string;
@@ -6,111 +8,57 @@ export type HistoryEntry = {
   minutes: number | null;
   stores: number;
   destination: string;
-  decision: "accept" | "reject" | "review";
+  decision: Decision;
   score: number | null;
+  source: string | null;
 };
 
-const STORAGE_KEY = "uberhelper.history.v1";
-// 只存數字結果、不存圖片，單筆很小，但還是設個上限避免無限長大。
-const MAX_ENTRIES = 200;
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-export function loadHistory(): HistoryEntry[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+/**
+ * 這個 App 只服務台北外送，記錄的「一天」固定用台北時區的日曆日切分，
+ * 不管伺服器實際跑在哪個時區（Render 的機器多半是 UTC）。用 UTC getter
+ * 搭配手動位移，才不會受執行環境的系統時區影響。
+ */
+export function taipeiDayKey(recordedAt: string): string {
+  const shifted = new Date(new Date(recordedAt).getTime() + TAIPEI_OFFSET_MS);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
-export function saveHistory(entries: HistoryEntry[]) {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(entries.slice(0, MAX_ENTRIES)),
-    );
-  } catch {
-    // 儲存空間滿了或被瀏覽器封鎖時，記錄功能就當沒發生，不影響主要分析流程。
-  }
-}
-
-export function appendHistoryEntry(
-  entries: HistoryEntry[],
-  entry: HistoryEntry,
-): HistoryEntry[] {
-  return [entry, ...entries].slice(0, MAX_ENTRIES);
-}
-
-// localStorage 在 SSR 階段不存在，用 useSyncExternalStore 而不是
-// useEffect+setState 讀取，才能讓 React 自己處理「伺服器渲染時是空的、
-// 掛載後才補上真正資料」這件事，不會有 hydration 不一致的問題。
-type Listener = () => void;
-let listeners: Listener[] = [];
-let cachedSnapshot: HistoryEntry[] | null = null;
-
-function notify(next: HistoryEntry[]) {
-  cachedSnapshot = next;
-  for (const listener of listeners) listener();
-}
-
-export function subscribeToHistory(listener: Listener) {
-  listeners.push(listener);
-  return () => {
-    listeners = listeners.filter((current) => current !== listener);
-  };
-}
-
-export function getHistorySnapshot(): HistoryEntry[] {
-  if (cachedSnapshot === null) cachedSnapshot = loadHistory();
-  return cachedSnapshot;
-}
-
-export function getServerHistorySnapshot(): HistoryEntry[] {
-  return [];
-}
-
-export function recordEntry(entry: HistoryEntry) {
-  const next = appendHistoryEntry(loadHistory(), entry);
-  saveHistory(next);
-  notify(next);
-}
-
-export function clearEntries(keep: (entry: HistoryEntry) => boolean) {
-  const next = loadHistory().filter(keep);
-  saveHistory(next);
-  notify(next);
-}
-
-function isSameLocalDay(a: Date, b: Date) {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-export function todaysEntries(
-  entries: HistoryEntry[],
-  now = new Date(),
-): HistoryEntry[] {
-  return entries.filter((entry) =>
-    isSameLocalDay(new Date(entry.recordedAt), now),
-  );
-}
-
-export function summarizeToday(entries: HistoryEntry[], now = new Date()) {
-  const today = todaysEntries(entries, now);
-  const accepted = today.filter((entry) => entry.decision === "accept");
+export function summarize(entries: HistoryEntry[]) {
+  const accepted = entries.filter((entry) => entry.decision === "accept");
 
   return {
-    count: today.length,
+    count: entries.length,
     acceptedCount: accepted.length,
     acceptedIncome: accepted.reduce((sum, entry) => sum + entry.income, 0),
   };
+}
+
+export type DayGroup = ReturnType<typeof summarize> & {
+  day: string;
+  entries: HistoryEntry[];
+};
+
+/** 依台北日曆日分組，最新的一天排最前面；同一天內維持原本傳入的順序。 */
+export function groupByDay(entries: HistoryEntry[]): DayGroup[] {
+  const byDay = new Map<string, HistoryEntry[]>();
+
+  for (const entry of entries) {
+    const key = taipeiDayKey(entry.recordedAt);
+    const bucket = byDay.get(key);
+    if (bucket) bucket.push(entry);
+    else byDay.set(key, [entry]);
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
+    .map(([day, dayEntries]) => ({
+      day,
+      entries: dayEntries,
+      ...summarize(dayEntries),
+    }));
 }

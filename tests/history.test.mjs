@@ -1,15 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  appendHistoryEntry,
-  getServerHistorySnapshot,
-  loadHistory,
-  recordEntry,
-  saveHistory,
-  subscribeToHistory,
-  summarizeToday,
-  todaysEntries,
-} from "../app/history.ts";
+import { groupByDay, summarize, taipeiDayKey } from "../app/history.ts";
 
 function entry(overrides = {}) {
   return {
@@ -22,67 +13,72 @@ function entry(overrides = {}) {
     destination: "信義區吳興街",
     decision: "accept",
     score: 71,
+    source: "1.2.3.4",
     ...overrides,
   };
 }
 
-test("沒有 window（SSR/測試環境）時讀寫都安全地什麼都不做", () => {
-  assert.deepEqual(loadHistory(), []);
-  assert.doesNotThrow(() => saveHistory([entry()]));
+test("台北日曆日的分界點是 UTC 16:00（隔天 00:00 台北時間），不是伺服器的系統時區", () => {
+  // Render 的機器多半跑 UTC，這裡刻意選在 UTC 邊界附近驗證，不能只測「明顯是同一天」的案例。
+  assert.equal(taipeiDayKey("2026-07-25T15:59:00.000Z"), "2026-07-25");
+  assert.equal(taipeiDayKey("2026-07-25T16:00:00.000Z"), "2026-07-26");
+  assert.equal(taipeiDayKey("2026-07-25T23:59:00.000Z"), "2026-07-26");
 });
 
-test("新記錄加在最前面，且超過上限會被裁掉", () => {
-  const base = Array.from({ length: 200 }, (_, i) => entry({ id: `old-${i}` }));
-  const result = appendHistoryEntry(base, entry({ id: "new" }));
-
-  assert.equal(result.length, 200);
-  assert.equal(result[0].id, "new");
-});
-
-test("只挑出今天（本機時區）的記錄", () => {
-  const now = new Date("2026-07-26T15:00:00");
+test("summarize 只加總已接單的金額，不接／確認資料不計入", () => {
   const entries = [
-    entry({ id: "today-morning", recordedAt: "2026-07-26T01:00:00" }),
-    entry({ id: "yesterday", recordedAt: "2026-07-25T23:59:00" }),
-    entry({ id: "today-evening", recordedAt: "2026-07-26T23:00:00" }),
+    entry({ decision: "accept", income: 118 }),
+    entry({ decision: "reject", income: 60 }),
+    entry({ decision: "review", income: 0 }),
   ];
 
-  const result = todaysEntries(entries, now);
-
-  assert.deepEqual(
-    result.map((e) => e.id),
-    ["today-morning", "today-evening"],
-  );
-});
-
-test("伺服器快照永遠是空陣列，確保 SSR 跟剛掛載時畫面一致", () => {
-  assert.deepEqual(getServerHistorySnapshot(), []);
-});
-
-test("recordEntry 會通知訂閱者（給 useSyncExternalStore 用）", () => {
-  let notified = 0;
-  const unsubscribe = subscribeToHistory(() => {
-    notified += 1;
-  });
-
-  recordEntry(entry({ id: "notify-test" }));
-  unsubscribe();
-
-  assert.equal(notified, 1);
-});
-
-test("今日摘要只加總已接單的金額，不接／確認資料不計入", () => {
-  const now = new Date("2026-07-26T15:00:00");
-  const entries = [
-    entry({ id: "a", recordedAt: "2026-07-26T09:00:00", decision: "accept", income: 118 }),
-    entry({ id: "b", recordedAt: "2026-07-26T10:00:00", decision: "reject", income: 60 }),
-    entry({ id: "c", recordedAt: "2026-07-26T11:00:00", decision: "review", income: 0 }),
-    entry({ id: "d", recordedAt: "2026-07-25T09:00:00", decision: "accept", income: 999 }),
-  ];
-
-  const summary = summarizeToday(entries, now);
+  const summary = summarize(entries);
 
   assert.equal(summary.count, 3);
   assert.equal(summary.acceptedCount, 1);
   assert.equal(summary.acceptedIncome, 118);
+});
+
+test("groupByDay 依台北日曆日分組，最新的一天排最前面", () => {
+  const entries = [
+    entry({ id: "a", recordedAt: "2026-07-24T09:00:00.000Z" }), // 台北 07-24 17:00
+    entry({ id: "b", recordedAt: "2026-07-26T01:00:00.000Z" }), // 台北 07-26 09:00
+    entry({ id: "c", recordedAt: "2026-07-26T20:00:00.000Z" }), // 台北 07-27 04:00
+  ];
+
+  const days = groupByDay(entries);
+
+  assert.deepEqual(
+    days.map((group) => group.day),
+    ["2026-07-27", "2026-07-26", "2026-07-24"],
+  );
+  assert.deepEqual(
+    days[0].entries.map((e) => e.id),
+    ["c"],
+  );
+  assert.deepEqual(
+    days[1].entries.map((e) => e.id),
+    ["b"],
+  );
+  assert.deepEqual(
+    days[2].entries.map((e) => e.id),
+    ["a"],
+  );
+});
+
+test("groupByDay 同一天內維持原本傳入的順序，並附上該天的摘要", () => {
+  const entries = [
+    entry({ id: "first", recordedAt: "2026-07-26T01:00:00.000Z", decision: "accept", income: 100 }),
+    entry({ id: "second", recordedAt: "2026-07-26T02:00:00.000Z", decision: "reject", income: 50 }),
+  ];
+
+  const [group] = groupByDay(entries);
+
+  assert.deepEqual(
+    group.entries.map((e) => e.id),
+    ["first", "second"],
+  );
+  assert.equal(group.count, 2);
+  assert.equal(group.acceptedCount, 1);
+  assert.equal(group.acceptedIncome, 100);
 });
