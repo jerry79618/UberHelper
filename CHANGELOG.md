@@ -2,6 +2,11 @@
 
 UberHelper web 的所有修改都記在這裡，最新的日期放最上面。
 
+## 2026-07-27（傍晚）
+
+- **migration 改成啟動時自動套用，不需要 Shell**（[db/migrate.mjs](db/migrate.mjs)、[server.mjs](server.mjs)）— `/history` 顯示 `relation "order_history" does not exist`，資料表從來沒被建立。原本我叫使用者去 Render 的 Shell 跑 `npm run db:migrate`，查證後發現這條路走不通：**Render 的 Shell 是付費方案才有的功能**，免費方案進不去；而且 `db:migrate` 走的是 drizzle-kit，那是 devDependency，Render 若以 `NODE_ENV=production` 建置根本不會安裝它。改成伺服器啟動時用 `drizzle-orm/node-postgres/migrator`（drizzle-orm 是正式依賴）讀取已 commit 的 `drizzle/` SQL 自動套用。migration 失敗只記錄不擋啟動——截圖分析本身不需要資料庫，只有 `/history` 受影響，硬是不啟動反而更糟。
+- **首次真正驗證資料庫這一塊**（[tests/migration.test.mjs](tests/migration.test.mjs)）— 之前的資料庫程式碼只驗證過「型別過、build 過」，從來沒接上真正的 Postgres。裝了 `@electric-sql/pglite`（真正的 Postgres 編譯成 WASM，devDependency）寫了 4 個測試：migration 能在真 Postgres 上套用、資料表欄位跟 schema 一致、重複套用安全（啟動時每次都會跑）、寫入讀取完整往返（含 null 與預設值）。**仍未涵蓋**：`pg` 驅動本身、連線字串解析、Render 受管 Postgres 的 SSL 設定——那些只有接上真的遠端資料庫才驗得到。
+
 ## 2026-07-27（下午）
 
 - **支援包裹單，修掉三個用真實截圖重現的解析 bug**（[app/order.ts](app/order.ts)、[app/ocr-region.ts](app/ocr-region.ts)）— 使用者回報一張 NT$249 的包裹單解析錯誤。直接對磁碟上的真實截圖跑 tesseract.js（見 [[ocr-debugging-approach]]），三個問題都完整重現：

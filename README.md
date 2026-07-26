@@ -105,11 +105,19 @@ Postgres instance — Cloudflare D1 does not work outside Cloudflare Workers.
    Postgres database, wiring `DATABASE_URL` automatically. (Or create the two
    resources by hand and set `DATABASE_URL` on the web service to the
    Postgres instance's **Internal Database URL**.)
-3. After the first deploy, apply the migration once: open the web service's
-   Shell tab on Render and run `npm run db:migrate` (or run it locally with
-   `DATABASE_URL` set to the database's **External Database URL**).
+3. That's it — migrations run automatically on startup, so the
+   `order_history` table is created on the first boot. No shell access
+   needed, which matters because Render's Shell tab is a paid-plan feature.
 4. For local development against the same database, add `DATABASE_URL` to a
    git-ignored `.env.local` file.
+
+Migrations are applied by [`db/migrate.mjs`](db/migrate.mjs) using
+`drizzle-orm/node-postgres/migrator`, reading the committed SQL in
+[`drizzle/`](drizzle/). It deliberately avoids `drizzle-kit` at runtime,
+since that's a devDependency and won't be installed when Render builds with
+`NODE_ENV=production`. A failed migration is logged but does not block
+startup: screenshot analysis works without a database, only `/history` needs
+one.
 
 `npm run build` + `npm run start` is a portable Node server (respects
 `$PORT`) — it does not depend on Cloudflare Workers, `wrangler`, or the

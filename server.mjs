@@ -32,6 +32,18 @@ process.on("uncaughtException", (error, origin) => {
   );
 });
 
+// 先套用 migration 再開始服務，這樣第一次部署就有資料表可用。失敗不擋啟動：
+// 網站本身（截圖分析）不需要資料庫，只有 /history 會受影響，硬是不啟動反而更糟。
+try {
+  const { runMigrations } = await import("./db/migrate.mjs");
+  await runMigrations();
+} catch (error) {
+  console.error(
+    "[server] migration 失敗，網站照常啟動，但 /history 會讀不到記錄:",
+    inspect(error, { depth: 5 }),
+  );
+}
+
 const { startProdServer } = await import("vinext/server/prod-server");
 
 const port = Number(process.env.PORT ?? 3000);
