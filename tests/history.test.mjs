@@ -25,18 +25,57 @@ test("台北日曆日的分界點是 UTC 16:00（隔天 00:00 台北時間），
   assert.equal(taipeiDayKey("2026-07-25T23:59:00.000Z"), "2026-07-26");
 });
 
-test("summarize 只加總已接單的金額，不接／確認資料不計入", () => {
+test("summarize 統計好單比例，刻意不加總金額（上傳不等於接單）", () => {
   const entries = [
     entry({ decision: "accept", income: 118 }),
     entry({ decision: "reject", income: 60 }),
-    entry({ decision: "review", income: 0 }),
+    entry({ decision: "accept", income: 200 }),
+    entry({ decision: "reject", income: 40 }),
   ];
 
   const summary = summarize(entries);
 
-  assert.equal(summary.count, 3);
-  assert.equal(summary.acceptedCount, 1);
-  assert.equal(summary.acceptedIncome, 118);
+  assert.equal(summary.count, 4);
+  assert.equal(summary.worthTakingCount, 2);
+  assert.equal(summary.worthTakingRatio, 0.5);
+  // 加總金額會讀起來像實際收入，是誤導，所以刻意不提供這個欄位。
+  assert.equal("acceptedIncome" in summary, false);
+});
+
+test("平均效率排除算不出來的記錄，不會被 0 拉低", () => {
+  const summary = summarize([
+    // 時薪 $240、每公里 $20
+    entry({ income: 120, distance: 6, minutes: 30 }),
+    // 時薪 $360、每公里 $30
+    entry({ income: 180, distance: 6, minutes: 30 }),
+    // 金額沒讀到（判為 review），算不出效率，兩個平均都要排除
+    entry({ decision: "review", income: 0, distance: 0, minutes: null }),
+    // 有金額但沒時間：時薪算不出來要排除，每公里還是算得出來
+    entry({ income: 150, distance: 6, minutes: null }),
+  ]);
+
+  assert.equal(summary.count, 4);
+  assert.equal(Math.round(summary.averageHourly), 300);
+  // 每公里取 20、30、25 三筆的平均
+  assert.equal(Math.round(summary.averagePerKm), 25);
+});
+
+test("完全沒有可用資料時平均值是 null，畫面顯示破折號而不是 NaN", () => {
+  const summary = summarize([
+    entry({ decision: "review", income: 0, distance: 0, minutes: null }),
+  ]);
+
+  assert.equal(summary.averageHourly, null);
+  assert.equal(summary.averagePerKm, null);
+  assert.equal(summary.worthTakingRatio, 0);
+});
+
+test("沒有任何記錄時比例是 0，不會除以 0", () => {
+  const summary = summarize([]);
+
+  assert.equal(summary.count, 0);
+  assert.equal(summary.worthTakingRatio, 0);
+  assert.equal(summary.averageHourly, null);
 });
 
 test("groupByDay 依台北日曆日分組，最新的一天排最前面", () => {
@@ -79,6 +118,6 @@ test("groupByDay 同一天內維持原本傳入的順序，並附上該天的摘
     ["first", "second"],
   );
   assert.equal(group.count, 2);
-  assert.equal(group.acceptedCount, 1);
-  assert.equal(group.acceptedIncome, 100);
+  assert.equal(group.worthTakingCount, 1);
+  assert.equal(group.worthTakingRatio, 0.5);
 });

@@ -821,7 +821,46 @@ pre {
 }
 
 .history-summary-page {
-  margin-bottom: 34px;
+  /* 四格（收到的單／值得接／平均時薪／平均每公里），窄畫面自動折行。 */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 18px;
+}
+
+.history-summary strong em {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.history-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 30px;
+}
+
+.clear-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.text-button.danger {
+  color: var(--coral);
+}
+
+.text-button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.clear-error {
+  color: var(--coral);
 }
 
 .history-day {

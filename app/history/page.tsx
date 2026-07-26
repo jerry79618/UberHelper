@@ -3,8 +3,13 @@ import Link from "next/link";
 import { getDb } from "../../db";
 import { orderHistory } from "../../db/schema";
 import { groupByDay, summarize, type HistoryEntry } from "../history";
+import { ClearHistoryButton } from "./clear-button";
 
 export const dynamic = "force-dynamic";
+
+function formatMoney(value: number | null) {
+  return value === null ? "—" : `$${Math.round(value)}`;
+}
 
 function toHistoryEntry(row: typeof orderHistory.$inferSelect): HistoryEntry {
   return {
@@ -21,10 +26,14 @@ function toHistoryEntry(row: typeof orderHistory.$inferSelect): HistoryEntry {
   };
 }
 
+/**
+ * 這裡是「當時系統給的建議」，不是使用者實際的行為，所以用「值得／不值得」
+ * 而不是「接單／不接」——後者讀起來像已經接了。
+ */
 function decisionLabel(decision: HistoryEntry["decision"]) {
-  if (decision === "accept") return "接單";
-  if (decision === "reject") return "不接";
-  return "確認資料";
+  if (decision === "accept") return "值得";
+  if (decision === "reject") return "不值得";
+  return "資料不全";
 }
 
 async function loadEntries() {
@@ -82,8 +91,11 @@ export default async function HistoryPage() {
           <span className="brand-mark">UH</span>
           <span>UberHelper</span>
         </Link>
-        <h1>所有裝置的分析記錄</h1>
-        <p>不論從手機、電腦、哪個 IP 上傳，分析完都會集中記在這裡。</p>
+        <h1>收到的單品質記錄</h1>
+        <p>
+          不論從手機、電腦、哪個 IP 上傳都會集中記在這裡。這裡記的是「你收到
+          什麼樣的單」，<strong>上傳不等於接了這張單</strong>，所以不會累計實際收入。
+        </p>
       </header>
 
       {error && (
@@ -101,17 +113,28 @@ export default async function HistoryPage() {
         <>
           <div className="history-summary history-summary-page">
             <div>
-              <span>累計已分析</span>
+              <span>收到的單</span>
               <strong>{overall.count} 筆</strong>
             </div>
             <div>
-              <span>建議接單</span>
-              <strong>{overall.acceptedCount} 筆</strong>
+              <span>其中值得接</span>
+              <strong>
+                {overall.worthTakingCount} 筆
+                <em>（{Math.round(overall.worthTakingRatio * 100)}%）</em>
+              </strong>
             </div>
             <div>
-              <span>接單預估收入</span>
-              <strong>${overall.acceptedIncome}</strong>
+              <span>平均時薪</span>
+              <strong>{formatMoney(overall.averageHourly)}</strong>
             </div>
+            <div>
+              <span>平均每公里</span>
+              <strong>{formatMoney(overall.averagePerKm)}</strong>
+            </div>
+          </div>
+
+          <div className="history-actions">
+            <ClearHistoryButton count={overall.count} />
           </div>
 
           {days.map((group) => (
@@ -119,8 +142,8 @@ export default async function HistoryPage() {
               <div className="history-day-header">
                 <h2>{group.day}</h2>
                 <span>
-                  {group.count} 筆・接單 {group.acceptedCount} 筆・預估收入 $
-                  {group.acceptedIncome}
+                  {group.count} 筆・值得接 {group.worthTakingCount} 筆・平均時薪{" "}
+                  {formatMoney(group.averageHourly)}
                 </span>
               </div>
 

@@ -21,7 +21,7 @@ function toRouteErrorMessage(error: unknown) {
   const combined = `${error.message} ${detail}`;
 
   if (/relation .* does not exist/.test(combined)) {
-    return "order_history 資料表還沒建立。請在 Render 的 Shell 執行 `npm run db:migrate` 套用 migration。";
+    return "order_history 資料表還沒建立。migration 會在伺服器啟動時自動套用，請重新部署一次，或檢查啟動 log 裡 [migrate] 開頭的訊息。";
   }
 
   return detail ? `${error.message}（原因：${detail}）` : error.message;
@@ -72,6 +72,29 @@ export async function POST(request: Request) {
       .returning();
 
     return Response.json({ entry }, { status: 201 });
+  } catch (error) {
+    return Response.json(
+      { error: toRouteErrorMessage(error) },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * 清空所有記錄。
+ *
+ * 注意：這個端點沒有任何身分驗證，知道網址的人都能清掉資料。這個網站本身
+ * 就是公開的個人工具、記錄也只是測試用的統計，所以先維持簡單；如果之後
+ * 需要保護，最省事的做法是加一個環境變數當密鑰再比對。
+ */
+export async function DELETE() {
+  try {
+    const db = getDb();
+    const deleted = await db.delete(orderHistory).returning({
+      id: orderHistory.id,
+    });
+
+    return Response.json({ deleted: deleted.length });
   } catch (error) {
     return Response.json(
       { error: toRouteErrorMessage(error) },

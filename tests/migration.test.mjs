@@ -126,3 +126,39 @@ test("recorded_at 有預設值，不用手動給也能寫入", async () => {
 
   await client.close();
 });
+
+test("清空所有記錄（對應 DELETE /api/history）", async () => {
+  const { db, client } = await freshDb();
+
+  await db.insert(orderHistory).values([
+    { id: "a", income: 100, distance: 3, decision: "accept" },
+    { id: "b", income: 50, distance: 2, decision: "reject" },
+  ]);
+  assert.equal((await db.select().from(orderHistory)).length, 2);
+
+  const deleted = await db
+    .delete(orderHistory)
+    .returning({ id: orderHistory.id });
+
+  assert.equal(deleted.length, 2, "returning 應回報刪除筆數給 API 回應用");
+  assert.equal((await db.select().from(orderHistory)).length, 0);
+
+  // 清空後還要能繼續寫入（不能因為刪除破壞了什麼）。
+  await db
+    .insert(orderHistory)
+    .values({ id: "c", income: 80, distance: 4, decision: "accept" });
+  assert.equal((await db.select().from(orderHistory)).length, 1);
+
+  await client.close();
+});
+
+test("清空空資料表不會出錯", async () => {
+  const { db, client } = await freshDb();
+
+  const deleted = await db
+    .delete(orderHistory)
+    .returning({ id: orderHistory.id });
+
+  assert.equal(deleted.length, 0);
+  await client.close();
+});

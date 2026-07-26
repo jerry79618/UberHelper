@@ -28,13 +28,34 @@ export function taipeiDayKey(recordedAt: string): string {
   return `${year}-${month}-${day}`;
 }
 
+function average(values: number[]) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+/**
+ * 這裡統計的是「收到的單品質如何」，不是實際收入。
+ *
+ * 上傳截圖只代表看過這張單，不代表真的接了，所以刻意不做任何金額加總——
+ * 加總會讀起來像已經賺到的錢，那是誤導。改成看好單比例與平均效率。
+ */
 export function summarize(entries: HistoryEntry[]) {
-  const accepted = entries.filter((entry) => entry.decision === "accept");
+  const worthTaking = entries.filter((entry) => entry.decision === "accept");
+  // 缺金額或距離的記錄（判為「確認資料」的那些）算不出效率，排除掉再平均，
+  // 不然會被 0 拉低。
+  const hourly = entries
+    .filter((entry) => entry.income > 0 && (entry.minutes ?? 0) > 0)
+    .map((entry) => (entry.income / (entry.minutes as number)) * 60);
+  const perKm = entries
+    .filter((entry) => entry.income > 0 && entry.distance > 0)
+    .map((entry) => entry.income / entry.distance);
 
   return {
     count: entries.length,
-    acceptedCount: accepted.length,
-    acceptedIncome: accepted.reduce((sum, entry) => sum + entry.income, 0),
+    worthTakingCount: worthTaking.length,
+    worthTakingRatio: entries.length ? worthTaking.length / entries.length : 0,
+    averageHourly: average(hourly),
+    averagePerKm: average(perKm),
   };
 }
 

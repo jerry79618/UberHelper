@@ -2,6 +2,15 @@
 
 UberHelper web 的所有修改都記在這裡，最新的日期放最上面。
 
+## 2026-07-27（晚上）
+
+- **修正記錄頁的語意誤導：上傳不等於接單**（[app/history.ts](app/history.ts)、[app/history/page.tsx](app/history/page.tsx)）— 原本顯示「建議接單 4 筆／接單預估收入 $1326」，讀起來像使用者真的接了這些單並賺到這筆錢，但上傳截圖只代表看過這張單。使用者指出這個記錄的目的是「記錄每次收到單的品質」。
+  - 移除所有金額加總（`acceptedIncome`），改成能反映品質的指標：**收到的單**、**其中值得接（含百分比）**、**平均時薪**、**平均每公里**。有測試明確斷言 `acceptedIncome` 這個欄位不存在，避免以後又被加回來。
+  - 平均值刻意排除算不出來的記錄（金額或時間沒讀到、判為「資料不全」的那些），否則會被 0 拉低；完全沒有可用資料時回傳 `null`，畫面顯示破折號而不是 `NaN`。
+  - 逐筆的標籤從「接單／不接」改成「**值得／不值得／資料不全**」——前者同樣讀起來像已經接了。標題也改成「收到的單品質記錄」並明講上傳不等於接單。
+- **新增清除所有記錄的按鈕**（[app/api/history/route.ts](app/api/history/route.ts)、[app/history/clear-button.tsx](app/history/clear-button.tsx)）— 加了 `DELETE /api/history`，以及一個需要二次確認（顯示筆數、提醒無法復原）的按鈕；刪除後用 `router.refresh()` 重新取得伺服器渲染的頁面。**這個端點沒有身分驗證**，知道網址的人都能清掉資料——目前記錄只是測試用統計、網站本身也是公開的，所以先維持簡單，程式碼註解裡有記下這個取捨。
+- **DELETE 行為也用真 Postgres 驗證過**（[tests/migration.test.mjs](tests/migration.test.mjs)）— 新增兩個測試：刪除會正確回報筆數（API 回應用得到）且刪完還能繼續寫入、以及對空資料表刪除不會出錯。
+
 ## 2026-07-27（傍晚）
 
 - **migration 改成啟動時自動套用，不需要 Shell**（[db/migrate.mjs](db/migrate.mjs)、[server.mjs](server.mjs)）— `/history` 顯示 `relation "order_history" does not exist`，資料表從來沒被建立。原本我叫使用者去 Render 的 Shell 跑 `npm run db:migrate`，查證後發現這條路走不通：**Render 的 Shell 是付費方案才有的功能**，免費方案進不去；而且 `db:migrate` 走的是 drizzle-kit，那是 devDependency，Render 若以 `NODE_ENV=production` 建置根本不會安裝它。改成伺服器啟動時用 `drizzle-orm/node-postgres/migrator`（drizzle-orm 是正式依賴）讀取已 commit 的 `drizzle/` SQL 自動套用。migration 失敗只記錄不擋啟動——截圖分析本身不需要資料庫，只有 `/history` 受影響，硬是不啟動反而更糟。
