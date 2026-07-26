@@ -63,7 +63,7 @@ export function moneyRectangle(
   const lineHeight = Math.max(total.bottom - total.top, 20);
   const badge = lines.find(
     (line) =>
-      /外送|獨享|拼單/.test(noSpace(line)) && line.bottom < total.top,
+      /外送|包裹|獨享|拼單/.test(noSpace(line)) && line.bottom < total.top,
   );
   const top = Math.max(
     0,

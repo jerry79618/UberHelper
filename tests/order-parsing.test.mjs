@@ -176,3 +176,96 @@ test("金額或距離缺一就要求確認，不硬判", () => {
   assert.equal(evaluate(parseOrderText("總計 28 分鐘 (5.8 公里)")).kind, "review");
   assert.equal(evaluate(parseOrderText("NT$118")).kind, "review");
 });
+
+// ===== 包裹單（2026-07-26 實測）=====
+// 包裹單跟外送單有三個結構差異，每個都曾造成誤判：
+//   1. 地址順序相反：外送是「郵遞區號→市→區→路」，包裹是「路→區→市→郵遞區號」。
+//   2. 站點代號長得像金額：「內湖站 Nt21」會被當成 NT$21（$249 被算成 $21）。
+//   3. 「包裹 (2)」標籤是白字配深色圓底，OCR 常常整行讀不出來。
+// 以下同樣是原封不動複製的真實 OCR 輸出。
+
+// NT$249、總計 30 分鐘 (7.4 公里)、1 取 1 送、送內湖區康寧路3段。
+// 注意 "內 湖 站 Nt21" 這段——就是它讓金額被誤讀成 21。
+const packageText249 = `A qgi12 <4 90 全 100]
+文 德 路 A
+w=
+用
+2:3 WA
+CT pimmi LJ
+讓
+器
+忠孝 東 路 蕊 段
+八 德 路 四 段
+永吉 路
+市 南港 國 宅
+8 88 B= x
+© 總 計 30 分 鐘 (7.4 公里 )
+? MOMO 富 昇 一 般 件 內 湖 站 Nt21
+| 康寧 路 3 段 190 巷 17 號 218, 內 湖區 , 臺北
+市 114
+S 需 顧 客 確認
+接受
+0`;
+
+// NT$414、包裹(2)、總計 51 分鐘 (14.5 公里)、1 取 2 送、終點汐止區（冷區）。
+// 「包裹 (2)」那行 OCR 完全沒讀出來，取件點數要靠數地址行數補回。
+const packageText414 = `11:11 手 wl 全 09
+Hy _—
+<3 7
+$0
+\gshan > ge
+TSA) 會
+人 台北 南港 國 宅
+5
+© 總 計 51 分 鐘 (14.5 公里 )
+? 安康 路 32 巷 24 弄 7 號 , 內 湖區 114,TW
+| 東湖 路 43 巷 10 號 418, 內 湖區 , 臺北 市
+114
+| 汐 萬 路 3 段 199 巷 2 弄 9 號 , 汐止 區 , 新 北
+市 221
+S 需 顧 客 確認
+接受`;
+
+test("站點代號 Nt21 不會被當成金額（金額要靠 legacy 重掃補上）", () => {
+  // 第一階段讀不到真正的金額時，income 必須留空好讓金額重掃接手，
+  // 絕對不能把站點代號的 21 當成金額（曾導致 $249 的單被算成時薪 $42 判不接）。
+  assert.equal(parseOrderText(packageText249).income, "");
+
+  const withRescan = parseOrderText(packageText249, "‘ NT$249 ‘");
+  assert.equal(withRescan.income, "249");
+});
+
+test("包裹單的地址順序相反（路在區前面）仍抓得出行政區與路名", () => {
+  assert.equal(
+    parseOrderText(packageText249).destination,
+    "內湖區康寧路3段",
+  );
+  assert.equal(
+    parseOrderText(packageText414).destination,
+    "汐止區汐萬路3段",
+  );
+});
+
+test("「包裹 (2)」標籤讀不到時，用地址行數推算取件點數", () => {
+  // 1 取 2 送 = 3 個地址 → 扣掉最後的送達點 = 2
+  assert.equal(parseOrderText(packageText414).stores, "2");
+  // 1 取 1 送 = 2 個地址 → 1，用預設值即可所以留空
+  assert.equal(parseOrderText(packageText249).stores, "");
+});
+
+test("包裹單的時間與距離跟外送單一樣從「總計」那行取得", () => {
+  const a = parseOrderText(packageText249);
+  assert.equal(a.minutes, "30");
+  assert.equal(a.distance, "7.4");
+
+  const b = parseOrderText(packageText414);
+  assert.equal(b.minutes, "51");
+  assert.equal(b.distance, "14.5");
+});
+
+test("這張 $249 / 7.4km / 30 分的包裹單會建議接單", () => {
+  const decision = evaluate(parseOrderText(packageText249, "‘ NT$249 ‘"));
+
+  assert.equal(decision.kind, "accept");
+  assert.equal(Math.round(decision.hourlyIncome), 498);
+});

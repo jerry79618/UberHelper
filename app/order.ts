@@ -53,8 +53,9 @@ export const scoring = {
 
 const CHINESE = "\\u4e00-\\u9fa5";
 const districtPattern = new RegExp(`([${CHINESE}]{2,3}區)`);
+// 段號可能是國字（基隆路二段）也可能是阿拉伯數字（康寧路3段）。
 const roadPattern = new RegExp(
-  `([${CHINESE}]{1,6}(?:路|街|大道)(?:[一二三四五六七八九十]段)?)`,
+  `([${CHINESE}]{1,6}(?:路|街|大道)(?:[一二三四五六七八九十0-9]{1,2}段)?)`,
 );
 const villagePattern = new RegExp(`[${CHINESE}]{1,3}里`, "g");
 
@@ -117,22 +118,55 @@ function findAddressBlock(lines: string[]) {
   return "";
 }
 
-/** 把「110台灣台北市信義區惠安里吳興街432巷150號」收斂成「信義區吳興街」。 */
+/**
+ * 收斂成「行政區＋路名」。兩種派單的地址順序剛好相反，都要支援：
+ * - 外送單：「110台灣台北市信義區惠安里吳興街432巷150號」→ 區在路前面
+ * - 包裹單：「康寧路3段190巷17號2樓,內湖區,台北市114」→ 路在區前面
+ */
 function tidyAddress(raw: string) {
   const cleaned = raw
     .replace(/^[0-9\s]+/, "")
     .replace(/台灣|台北市|新北市|桃園市|台中市|台南市|高雄市/g, "")
     .trim();
   const district = cleaned.match(districtPattern)?.[1] ?? "";
+  const districtAt = district ? cleaned.indexOf(district) : -1;
   // 先切掉行政區再清里名，否則「信義區惠安里」會被當成一個里名整段吃掉。
-  const rest = (
-    district
-      ? cleaned.slice(cleaned.indexOf(district) + district.length)
-      : cleaned
+  const after = (
+    districtAt >= 0 ? cleaned.slice(districtAt + district.length) : cleaned
   ).replace(villagePattern, "");
-  const road = rest.match(roadPattern)?.[1] ?? "";
+  const before =
+    districtAt > 0
+      ? cleaned.slice(0, districtAt).replace(villagePattern, "")
+      : "";
+  const road =
+    after.match(roadPattern)?.[1] ?? before.match(roadPattern)?.[1] ?? "";
 
   return `${district}${road}` || cleaned.slice(0, 12) || raw.trim();
+}
+
+/**
+ * 數出停靠點有幾個。「外送 (2)」／「包裹 (2)」那個標籤是白字配深色圓底，
+ * 實測 OCR 常常整行讀不出來（$414 那張就是），所以不能只靠標籤。
+ * 地址列反而讀得穩，直接數地址行數當備援。
+ *
+ * 只數「連續」的地址區塊：地圖上的路名標籤也可能被誤判成地址，
+ * 但它們散落在畫面各處，不會跟停靠點清單連在一起。
+ */
+function countAddressStops(lines: string[]) {
+  let best = 0;
+  let current = 0;
+
+  for (const line of lines) {
+    if (isAddressLine(line)) {
+      current += 1;
+      best = Math.max(best, current);
+    } else if (!/^[0-9,\s]*$/.test(line)) {
+      // 純數字行（例如地址換行後只剩郵遞區號「114」）不該中斷連續計算。
+      current = 0;
+    }
+  }
+
+  return best;
 }
 
 /**
@@ -177,10 +211,13 @@ export function parseOrderText(text: string, moneyRegionText = ""): OrderFields 
     .replace(/[0-9]{1,2}:[0-9]{2}/g, " ");
 
   const incomePatterns = [
-    // 派單卡片的金額獨佔一行，整行吻合的優先。
+    // 派單卡片的金額獨佔一行，整行吻合的優先。整行吻合時貨幣符號可以缺，
+    // 因為一整行只有 NT 加數字幾乎不可能是別的東西。
     /^NT[$S5]?([0-9]{2,4}(?:\.[0-9]{1,2})?)$/im,
     /^[$]([0-9]{2,4}(?:\.[0-9]{1,2})?)$/m,
-    /NT[$S5]?([0-9]{2,4}(?:\.[0-9]{1,2})?)/i,
+    // 不限整行時「貨幣符號」必須存在。包裹單的站點代號長得像「內湖站 Nt21」，
+    // 符號設成選擇性會把 Nt21 讀成 21 元，實測就發生過（$249 的單被算成 $21）。
+    /NT[$S5]([0-9]{2,4}(?:\.[0-9]{1,2})?)/i,
     /[$]([0-9]{2,4}(?:\.[0-9]{1,2})?)/,
     /(?:預估收入|收入|費用|金額|車資)[:]?([0-9]{2,4}(?:\.[0-9]{1,2})?)/,
     /([0-9]{2,4}(?:\.[0-9]{1,2})?)元/,
@@ -207,6 +244,7 @@ export function parseOrderText(text: string, moneyRegionText = ""): OrderFields 
   const total = compactNoClock.match(
     /(?:總計|合計|共)([0-9]{1,3})分鐘?[^0-9]{0,4}([0-9]{1,3}(?:\.[0-9]+)?)公里/,
   );
+  const stops = countAddressStops(lines);
 
   return {
     income,
@@ -218,7 +256,11 @@ export function parseOrderText(text: string, moneyRegionText = ""): OrderFields 
       firstMatch(compactNoClock, [
         /([0-9]{1,3})(?:分鐘|分|min|mins|minutes)/i,
       ]),
-    stores: firstMatch(compactNoClock, [/(?:外送|訂單|取餐)\(([0-9]{1,2})\)/]),
+    // 外送單是「外送 (2)」，包裹單是「包裹 (2)」，兩種都代表要跑幾個點。
+    // 標籤讀不到時退回數地址行數（扣掉最後一個送達點）。
+    stores:
+      firstMatch(compactNoClock, [/(?:外送|包裹|訂單|取餐)\(([0-9]{1,2})\)/]) ||
+      (stops > 1 ? String(stops - 1) : ""),
     destination: parseDestination(lines),
   };
 }

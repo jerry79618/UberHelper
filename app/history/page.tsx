@@ -38,6 +38,28 @@ async function loadEntries() {
   return rows.map(toHistoryEntry);
 }
 
+/**
+ * Drizzle 只把 SQL 放在 message 裡，真正的原因（例如「資料表不存在」）藏在
+ * cause 的鏈上。只顯示 message 會得到一長串 SQL 卻看不出為什麼失敗。
+ */
+function describeDbError(error: unknown): string {
+  if (!(error instanceof Error)) return "讀取記錄失敗，請稍後再試。";
+
+  const causes: string[] = [];
+  let current: unknown = error.cause;
+  while (current instanceof Error && causes.length < 3) {
+    causes.push(current.message);
+    current = current.cause;
+  }
+  const detail = causes.join(" ← ");
+
+  if (/relation .* does not exist|order_history/.test(detail)) {
+    return `資料表 order_history 還不存在。請先套用 migration：在 Render 的 Shell 執行 npm run db:migrate（原始錯誤：${detail}）`;
+  }
+
+  return detail ? `${error.message}（原因：${detail}）` : error.message;
+}
+
 export default async function HistoryPage() {
   let entries: HistoryEntry[] = [];
   let error: string | null = null;
@@ -45,10 +67,9 @@ export default async function HistoryPage() {
   try {
     entries = await loadEntries();
   } catch (loadError) {
-    error =
-      loadError instanceof Error
-        ? loadError.message
-        : "讀取記錄失敗，請稍後再試。";
+    // 伺服器 log 留完整堆疊，畫面上只顯示收斂過的訊息。
+    console.error("[history] 讀取記錄失敗:", loadError);
+    error = describeDbError(loadError);
   }
 
   const days = groupByDay(entries);

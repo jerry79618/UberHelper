@@ -2,6 +2,15 @@
 
 UberHelper web 的所有修改都記在這裡，最新的日期放最上面。
 
+## 2026-07-27（下午）
+
+- **支援包裹單，修掉三個用真實截圖重現的解析 bug**（[app/order.ts](app/order.ts)、[app/ocr-region.ts](app/ocr-region.ts)）— 使用者回報一張 NT$249 的包裹單解析錯誤。直接對磁碟上的真實截圖跑 tesseract.js（見 [[ocr-debugging-approach]]），三個問題都完整重現：
+  1. **站點代號被當成金額**：`MOMO 富昇 一般件 內湖站 Nt21` 裡的 `Nt21` 被 `NT[$S5]?` 這個「貨幣符號可有可無」的規則吃下去，income 變成 `21`，時薪算出 $42 判「不接」；更糟的是因為誤抓到值，legacy 金額重掃根本不會被觸發。改成不限整行時**貨幣符號必須存在**（整行只有 `NT249` 的情況仍允許缺符號）。
+  2. **包裹單地址順序相反**：外送單是「郵遞區號→市→區→路」（`110台灣臺北市信義區…吳興街432巷150號`），包裹單是「路→區→市→郵遞區號」（`康寧路3段190巷17號 2樓, 內湖區, 臺北市 114`）。原本只在行政區「之後」找路名，包裹單就只抓到 `內湖區`、路名整段丟失。改成區之後找不到就往區之前找。順帶讓段號支援阿拉伯數字（`康寧路3段`，原本只認國字如 `基隆路二段`）。
+  3. **「包裹 (2)」標籤 OCR 讀不出來**：那個標籤是白字配深綠圓底，實測整行完全沒被辨識（跟金額同樣的低對比問題），所以無法靠改正則解決。改成標籤讀不到時**退回數地址行數**（連續的地址區塊，扣掉最後一個送達點）來推算取件點數——地址列辨識穩定得多。
+  - 四張真實截圖（$249 包裹、$414 包裹(2)、$118 外送(2)、$45 外送）現在全部解析正確，並用真實 OCR 輸出補了 5 個迴歸測試。
+- **資料庫錯誤訊息改成顯示真正的原因**（[app/history/page.tsx](app/history/page.tsx)、[app/api/history/route.ts](app/api/history/route.ts)）— `/history` 頁面只顯示 `Failed query: select ...` 一長串 SQL，完全看不出為什麼失敗，因為 Drizzle 把真正的原因（例如「資料表不存在」）放在 `cause` 鏈上而不是 `message`。改成往下走 cause 鏈把原因取出來，並在偵測到資料表不存在時直接告訴使用者要執行 `npm run db:migrate`。伺服器端也會 `console.error` 完整堆疊。
+
 ## 2026-07-27
 
 - **修復 Render 上啟動幾秒後就崩潰（Exited with status 7）**（[.node-version](.node-version)、[render.yaml](render.yaml)、[server.mjs](server.mjs)、[package.json](package.json)）— log 裡只有 `throw err` 和一個沒有內容的 `undefined`，完全無從追查。加上 `NODE_OPTIONS=--trace-uncaught` 拿到真正的堆疊後才查出完整因果鏈：某處產生一個**值為 `undefined` 的未處理 Promise 拒絕** → vinext 的 socket 錯誤防護網照設計把非網路斷線的錯誤原封不動重新拋出 → 程序以 status 7 死亡。本機用 `Promise.reject(undefined)` + vinext 的防護網**完整重現了一模一樣的崩潰**（同樣的檔案行號、同樣的 `undefined`、同樣的結束代碼 7），確認因果鏈無誤。

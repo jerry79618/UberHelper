@@ -4,14 +4,27 @@ import type { Decision } from "../../history";
 
 const DECISIONS: Decision[] = ["accept", "reject", "review"];
 
+/**
+ * Drizzle 只把 SQL 放在 message 裡，真正的原因藏在 cause 鏈上，
+ * 只讀 message 會得到一長串 SQL 卻看不出為什麼失敗。
+ */
 function toRouteErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unexpected error";
+  if (!(error instanceof Error)) return "Unexpected error";
 
-  if (message.includes("order_history") && message.includes("does not exist")) {
-    return "order_history 資料表還沒建立。先在本機執行 `npm run db:generate` 產生 migration，再套用到 Postgres（例如 `npx drizzle-kit migrate`）。";
+  const causes: string[] = [];
+  let current: unknown = error.cause;
+  while (current instanceof Error && causes.length < 3) {
+    causes.push(current.message);
+    current = current.cause;
+  }
+  const detail = causes.join(" ← ");
+  const combined = `${error.message} ${detail}`;
+
+  if (/relation .* does not exist/.test(combined)) {
+    return "order_history 資料表還沒建立。請在 Render 的 Shell 執行 `npm run db:migrate` 套用 migration。";
   }
 
-  return message;
+  return detail ? `${error.message}（原因：${detail}）` : error.message;
 }
 
 /** Cloudflare 用 cf-connecting-ip；一般反向代理常見 x-forwarded-for。 */
